@@ -4,6 +4,7 @@
 ## 06 May  2026
 
 - Fixed hardcode username is `hyprtoolkit`
+- Added `socat` for `Tak0 scripts`
 
 ## 04 May  2026
 
