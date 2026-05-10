@@ -86,13 +86,13 @@ if git clone --depth=1 --filter=blob:none "$repo_url" "$SRC_DIR"; then
         git tag --list | tail -n 20 | tee -a "$LOG" || true
         exit 1
     fi
-    # Install to /usr/local so pkg-config can prefer it over distro /usr
+    # Install to $INSTALL_PREFIX so pkg-config can prefer it over the distro location
     BUILD_DIR="$BUILD_ROOT/wayland-protocols"
     rm -rf "$BUILD_DIR" && mkdir -p "$BUILD_DIR"
-    meson setup "$BUILD_DIR" --prefix=/usr/local
+    meson setup "$BUILD_DIR" --prefix=$INSTALL_PREFIX
     meson compile -C "$BUILD_DIR" -j"$(nproc 2>/dev/null || getconf _NPROCESSORS_CONF)"
     if [ $DO_INSTALL -eq 1 ]; then
-        if sudo meson install -C "$BUILD_DIR" 2>&1 | tee -a "$MLOG"; then
+        if $(install_sudo) env $(install_destdir_env) meson install -C "$BUILD_DIR" 2>&1 | tee -a "$MLOG"; then
             printf "${OK} ${MAGENTA}wayland-protocols $tag${RESET} installed successfully.\n" 2>&1 | tee -a "$MLOG"
         else
             echo -e "${ERROR} Installation failed for ${YELLOW}wayland-protocols $tag${RESET}" 2>&1 | tee -a "$MLOG"

@@ -104,28 +104,28 @@ if git clone --recursive ${git_ref:+-b "$git_ref"} https://github.com/hyprwm/hyp
             echo "${NOTE} Adding Qt6 WaylandClientPrivate component to satisfy Debian Qt6 packaging." | tee -a "$MLOG"
             sed -i 's/WaylandClient)/WaylandClient WaylandClientPrivate)/' CMakeLists.txt
         fi
-        cmake -S . -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXE_LINKER_FLAGS="-lpci" -DCMAKE_SHARED_LINKER_FLAGS="-lpci" -DCMAKE_MODULE_LINKER_FLAGS="-lpci" 2>&1 | tee -a "$MLOG"
+        cmake -S . -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$INSTALL_PREFIX" -DCMAKE_EXE_LINKER_FLAGS="-lpci" -DCMAKE_SHARED_LINKER_FLAGS="-lpci" -DCMAKE_MODULE_LINKER_FLAGS="-lpci" 2>&1 | tee -a "$MLOG"
         cmake --build "$BUILD_DIR" -j "$(nproc 2>/dev/null || getconf _NPROCESSORS_CONF)" 2>&1 | tee -a "$MLOG"
         build_rc=${PIPESTATUS[0]}
         if [ $build_rc -ne 0 ]; then
             BUILD_FAILED=1
         fi
         if [ $DO_INSTALL -eq 1 ] && [ $BUILD_FAILED -eq 0 ]; then
-            sudo cmake --install "$BUILD_DIR" 2>&1 | tee -a "$MLOG"
+            $(install_sudo) env $(install_destdir_env) cmake --install "$BUILD_DIR" 2>&1 | tee -a "$MLOG"
         elif [ $DO_INSTALL -eq 1 ]; then
             echo "${ERROR} hyprsysteminfo build failed; skipping install." | tee -a "$MLOG"
         else
             echo "${NOTE} DRY RUN: skip install" | tee -a "$MLOG"
         fi
     elif [ -f meson.build ]; then
-        meson setup "$BUILD_DIR" --buildtype=release 2>&1 | tee -a "$MLOG"
+        meson setup "$BUILD_DIR" --buildtype=release --prefix="$INSTALL_PREFIX" 2>&1 | tee -a "$MLOG"
         meson compile -C "$BUILD_DIR" 2>&1 | tee -a "$MLOG"
         build_rc=${PIPESTATUS[0]}
         if [ $build_rc -ne 0 ]; then
             BUILD_FAILED=1
         fi
         if [ $DO_INSTALL -eq 1 ] && [ $BUILD_FAILED -eq 0 ]; then
-            sudo meson install -C "$BUILD_DIR" 2>&1 | tee -a "$MLOG"
+            $(install_sudo) env $(install_destdir_env) meson install -C "$BUILD_DIR" 2>&1 | tee -a "$MLOG"
         elif [ $DO_INSTALL -eq 1 ]; then
             echo "${ERROR} hyprsysteminfo build failed; skipping install." | tee -a "$MLOG"
         else

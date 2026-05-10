@@ -47,14 +47,9 @@ for PKG in "${COMMON_DEPS[@]}"; do
 done
 
 # Prefer locally built hypr* libs and scanner when available
-export PATH="/usr/local/bin:${PATH}"
-if [[ ":${PKG_CONFIG_PATH:-}:" != *":/usr/local/share/pkgconfig:"* ]]; then
-  export PKG_CONFIG_PATH="/usr/local/share/pkgconfig:${PKG_CONFIG_PATH:-}"
-fi
-if [[ ":${PKG_CONFIG_PATH}:" != *":/usr/local/lib/pkgconfig:"* ]]; then
-  export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:${PKG_CONFIG_PATH}"
-fi
-export CMAKE_PREFIX_PATH="/usr/local:${CMAKE_PREFIX_PATH:-}"
+export PATH="$DESTDIR$INSTALL_PREFIX/bin:$INSTALL_PREFIX/bin:${PATH}"
+export PKG_CONFIG_PATH="$DESTDIR$INSTALL_PREFIX/lib/pkgconfig:$INSTALL_PREFIX/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+export CMAKE_PREFIX_PATH="$DESTDIR$INSTALL_PREFIX:$INSTALL_PREFIX:${CMAKE_PREFIX_PATH:-}"
 
 # Ensure hyprwayland-scanner is present
 if ! command -v hyprwayland-scanner >/dev/null 2>&1; then
@@ -84,9 +79,9 @@ fi
 
 # Optional but recommended protocols availability
 WL_PROTO_DIR=""
-for d in /usr/local/share/wayland-protocols /usr/share/wayland-protocols; do [ -d "$d" ] && WL_PROTO_DIR="$d" && break; done
+for d in "$DESTDIR$INSTALL_PREFIX/share/wayland-protocols" "$INSTALL_PREFIX/share/wayland-protocols" /usr/share/wayland-protocols; do [ -d "$d" ] && WL_PROTO_DIR="$d" && break; done
 HYP_PROTO_DIR=""
-for d in /usr/local/share/hyprland-protocols /usr/share/hyprland-protocols; do [ -d "$d" ] && HYP_PROTO_DIR="$d" && break; done
+for d in "$DESTDIR$INSTALL_PREFIX/share/hyprland-protocols" "$INSTALL_PREFIX/share/hyprland-protocols" /usr/share/hyprland-protocols; do [ -d "$d" ] && HYP_PROTO_DIR="$d" && break; done
 [ -n "$WL_PROTO_DIR" ]  && export WAYLAND_PROTOCOLS_DIR="$WL_PROTO_DIR"
 [ -n "$HYP_PROTO_DIR" ] && export HYPRLAND_PROTOCOLS_DIR="$HYP_PROTO_DIR"
 
@@ -101,7 +96,7 @@ if git clone --recursive ${git_ref:+-b "$git_ref"} https://github.com/hyprwm/hyp
   # Build with CMake
   CMAKE_FLAGS=(
     -DCMAKE_BUILD_TYPE=Release
-    -DCMAKE_INSTALL_PREFIX=/usr/local
+    -DCMAKE_INSTALL_PREFIX=$INSTALL_PREFIX
     -DCMAKE_CXX_STANDARD=23
   )
   [ -n "$WL_PROTO_DIR" ]  && CMAKE_FLAGS+=( -DWAYLAND_PROTOCOLS_DIR="$WL_PROTO_DIR" )
@@ -110,7 +105,7 @@ if git clone --recursive ${git_ref:+-b "$git_ref"} https://github.com/hyprwm/hyp
   cmake -S . -B "$BUILD_DIR" "${CMAKE_FLAGS[@]}"
   cmake --build "$BUILD_DIR" -j "$(nproc 2>/dev/null || getconf _NPROCESSORS_CONF)"
   if [ $DO_INSTALL -eq 1 ]; then
-    if sudo cmake --install "$BUILD_DIR" 2>&1 | tee -a "$MLOG" ; then
+    if $(install_sudo) env $(install_destdir_env) cmake --install "$BUILD_DIR" 2>&1 | tee -a "$MLOG" ; then
       printf "${OK} hyprpaper installed successfully.\n" 2>&1 | tee -a "$MLOG"
     else
       echo -e "${ERROR} Installation failed for hyprpaper." 2>&1 | tee -a "$MLOG"

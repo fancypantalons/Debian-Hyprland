@@ -1,4 +1,24 @@
-build
-Install-Logs
-CMakeFiles
+# Build artifacts (created by Global_functions.sh / install-scripts)
+build/
+Install-Logs/
+CMakeFiles/
 
+# Debian packaging artifacts (created by debhelper / dpkg-buildpackage)
+# These live alongside the source-controlled debian/control, debian/rules, etc.
+debian/debian-hyprland/
+debian/.debhelper/
+debian/debhelper-build-stamp
+debian/files
+debian/*.substvars
+debian/*.log
+debian/*.debhelper.log
+debian/tmp/
+
+# Backup files from refresh-hypr-tags.sh
+hypr-tags.env.bak-*
+
+# Editor/OS scratch
+*.swp
+*.swo
+*~
+.DS_Store

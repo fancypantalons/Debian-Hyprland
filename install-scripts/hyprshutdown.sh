@@ -37,13 +37,13 @@ if git clone --recursive ${git_ref:+-b "$git_ref"} https://github.com/hyprwm/hyp
     rm -rf "$BUILD_DIR" && mkdir -p "$BUILD_DIR"
     if [ -f CMakeLists.txt ]; then
         # Intentional: avoid forcing glaze on systems where it is unavailable.
-        cmake -S . -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE=Release -DCMAKE_DISABLE_FIND_PACKAGE_glaze=ON
+        cmake -S . -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$INSTALL_PREFIX" -DCMAKE_DISABLE_FIND_PACKAGE_glaze=ON
         cmake --build "$BUILD_DIR" -j "$(nproc 2>/dev/null || getconf _NPROCESSORS_CONF)"
-        if [ $DO_INSTALL -eq 1 ]; then sudo cmake --install "$BUILD_DIR" 2>&1 | tee -a "$MLOG"; else echo "${NOTE} DRY RUN: skip install" | tee -a "$MLOG"; fi
+        if [ $DO_INSTALL -eq 1 ]; then $(install_sudo) env $(install_destdir_env) cmake --install "$BUILD_DIR" 2>&1 | tee -a "$MLOG"; else echo "${NOTE} DRY RUN: skip install" | tee -a "$MLOG"; fi
     elif [ -f meson.build ]; then
-        meson setup "$BUILD_DIR" --buildtype=release
+        meson setup "$BUILD_DIR" --buildtype=release --prefix="$INSTALL_PREFIX"
         meson compile -C "$BUILD_DIR"
-        if [ $DO_INSTALL -eq 1 ]; then sudo meson install -C "$BUILD_DIR" 2>&1 | tee -a "$MLOG"; else echo "${NOTE} DRY RUN: skip install" | tee -a "$MLOG"; fi
+        if [ $DO_INSTALL -eq 1 ]; then $(install_sudo) env $(install_destdir_env) meson install -C "$BUILD_DIR" 2>&1 | tee -a "$MLOG"; else echo "${NOTE} DRY RUN: skip install" | tee -a "$MLOG"; fi
     else
         echo "${ERROR} Unknown build system for hyprshutdown" | tee -a "$MLOG"
     fi

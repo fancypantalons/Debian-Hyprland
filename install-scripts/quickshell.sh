@@ -23,9 +23,9 @@ if ! source "$(dirname "$(readlink -f "$0")")/Global_functions.sh"; then
     exit 1
 fi
 
-# Prefer /usr/local for pkg-config and CMake (for locally built libs like Breakpad)
-export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:/usr/local/share/pkgconfig:${PKG_CONFIG_PATH:-}"
-export CMAKE_PREFIX_PATH="/usr/local:${CMAKE_PREFIX_PATH:-}"
+# Prefer locally-built pkg-config and CMake (for locally built libs like Breakpad)
+export PKG_CONFIG_PATH="$DESTDIR$INSTALL_PREFIX/lib/pkgconfig:$INSTALL_PREFIX/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+export CMAKE_PREFIX_PATH="$DESTDIR$INSTALL_PREFIX:$INSTALL_PREFIX:${CMAKE_PREFIX_PATH:-}"
 
 # Ensure logs dir exists at repo root (we cd into source later)
 mkdir -p "$PARENT_DIR/Install-Logs"
@@ -39,8 +39,9 @@ if grep -Eiq '\bVERSION_CODENAME=trixie\b' /etc/os-release; then
   exit 0
 fi
 
-# Refresh sudo credentials once (install_package uses sudo internally)
-if command -v sudo >/dev/null 2>&1; then
+# Refresh sudo credentials once (install_package uses sudo internally).
+# Skip in DESTDIR builds — no sudo needed for staging tree.
+if [ -z "$DESTDIR" ] && command -v sudo >/dev/null 2>&1; then
     sudo -v 2>/dev/null || sudo -v
 fi
 
@@ -97,8 +98,14 @@ DEPS=(
 
 printf "\n%s - Installing ${SKY_BLUE}Quickshell build dependencies${RESET}....\n" "${NOTE}"
 # Single apt transaction for speed and robustness, but filter packages with no candidate
-sudo apt update 2>&1 | tee -a "$LOG"
-AVAILABLE_PKGS=()
+if [ -n "$DESTDIR" ]; then
+    AVAILABLE_PKGS=()
+elif ! sudo apt update 2>&1 | tee -a "$LOG"; then
+    echo "${WARN} apt update failed; attempting to continue." | tee -a "$LOG"
+    AVAILABLE_PKGS=()
+else
+    AVAILABLE_PKGS=()
+fi
 for PKG in "${DEPS[@]}"; do
     CAND=$(apt-cache policy "$PKG" | awk '/Candidate:/ {print $2}')
     if [ -n "$CAND" ] && [ "$CAND" != "(none)" ]; then
@@ -107,7 +114,9 @@ for PKG in "${DEPS[@]}"; do
         note "Skipping $PKG (no candidate in APT)"
     fi
 done
-if ! sudo apt install -y "${AVAILABLE_PKGS[@]}" 2>&1 | tee -a "$LOG"; then
+if [ -n "$DESTDIR" ]; then
+    echo "${INFO} Skipping apt install of Quickshell build deps (DESTDIR build; handled by Build-Depends)."
+elif ! sudo apt install -y "${AVAILABLE_PKGS[@]}" 2>&1 | tee -a "$LOG"; then
     echo "${ERROR} apt failed when installing Quickshell build dependencies." | tee -a "$LOG"
     exit 1
 fi
@@ -137,31 +146,39 @@ if ! pkg-config --exists breakpad; then
     if [ ! -x ./configure ]; then
       autoreconf -fi 2>&1 | tee -a "$MLOG"
     fi
-    ./configure --prefix=/usr/local 2>&1 | tee -a "$MLOG"
+    ./configure --prefix=$INSTALL_PREFIX 2>&1 | tee -a "$MLOG"
     make -j "$(nproc 2>/dev/null || getconf _NPROCESSORS_ONLN)" 2>&1 | tee -a "$MLOG"
-    sudo make install 2>&1 | tee -a "$MLOG"
+    $(install_sudo) env $(install_destdir_env) make install 2>&1 | tee -a "$MLOG"
+    # Quickshell only links against breakpad's client library; the helper
+    # binaries (dump_syms, minidump_*, sym_upload, etc.) are dev/debug tools
+    # that pollute /usr/bin. Drop them — keep the libs/headers/.pc files.
+    for bp_bin in dump_syms dump_syms_mac core2md pid2md sym_upload \
+                  microdump_stackwalk minidump-2-core minidump_dump \
+                  minidump_stackwalk minidump_upload; do
+        $(install_sudo) rm -f "$DESTDIR$INSTALL_PREFIX/bin/$bp_bin"
+    done
   ) || { echo "${ERROR} Breakpad build failed." | tee -a "$LOG"; exit 1; }
 
     # Provide pkg-config file if upstream didn't install one under the name 'breakpad'
     if ! pkg-config --exists breakpad; then
         if pkg-config --exists breakpad-client; then
-            sudo mkdir -p /usr/local/lib/pkgconfig
-            sudo ln -sf /usr/local/lib/pkgconfig/breakpad-client.pc /usr/local/lib/pkgconfig/breakpad.pc
-        elif [ -f /usr/local/lib/libbreakpad_client.a ] || [ -f /usr/local/lib/libbreakpad_client.so ]; then
+            $(install_sudo) mkdir -p "$DESTDIR$INSTALL_PREFIX/lib/pkgconfig"
+            $(install_sudo) ln -sf "$DESTDIR$INSTALL_PREFIX/lib/pkgconfig/breakpad-client.pc" "$DESTDIR$INSTALL_PREFIX/lib/pkgconfig/breakpad.pc"
+        elif [ -f "$INSTALL_PREFIX/lib/libbreakpad_client.a" ] || [ -f "$INSTALL_PREFIX/lib/libbreakpad_client.so" ]; then
             TMP_PC="/tmp/breakpad.pc.$$"
-            cat >"$TMP_PC" <<'PCEOF'
-prefix=/usr/local
-exec_prefix=${prefix}
-includedir=${prefix}/include
-libdir=${exec_prefix}/lib
+            cat >"$TMP_PC" <<PCEOF
+prefix=$INSTALL_PREFIX
+exec_prefix=\${prefix}
+includedir=\${prefix}/include
+libdir=\${exec_prefix}/lib
 Name: breakpad
 Description: Google Breakpad client library
 Version: 0
-Libs: -L${libdir} -lbreakpad_client
-Cflags: -I${includedir}
+Libs: -L\${libdir} -lbreakpad_client
+Cflags: -I\${includedir}
 PCEOF
-            sudo mkdir -p /usr/local/lib/pkgconfig
-            sudo install -m 644 "$TMP_PC" /usr/local/lib/pkgconfig/breakpad.pc
+            $(install_sudo) mkdir -p "$DESTDIR$INSTALL_PREFIX/lib/pkgconfig"
+            $(install_sudo) install -m 644 "$TMP_PC" "$DESTDIR$INSTALL_PREFIX/lib/pkgconfig/breakpad.pc"
             rm -f "$TMP_PC"
         fi
     fi
@@ -190,6 +207,7 @@ fi
 # Configure with Ninja; enable RelWithDebInfo, leave features ON (deps installed above)
 CMAKE_FLAGS=(
     -GNinja
+    -DCMAKE_INSTALL_PREFIX:PATH=$INSTALL_PREFIX
     -DCMAKE_BUILD_TYPE=RelWithDebInfo
     -DDISTRIBUTOR="Debian-Hyprland installer"
 )
@@ -216,7 +234,7 @@ if ! cmake --build "$BUILD_DIR" 2>&1 | tee -a "$MLOG"; then
 fi
 
 note "Installing Quickshell..."
-if ! sudo cmake --install "$BUILD_DIR" 2>&1 | tee -a "$MLOG"; then
+if ! $(install_sudo) env $(install_destdir_env) cmake --install "$BUILD_DIR" 2>&1 | tee -a "$MLOG"; then
     echo "${ERROR} Installation failed. See log: $MLOG" | tee -a "$LOG"
     exit 1
 fi
@@ -224,9 +242,9 @@ fi
 echo "${OK} Quickshell installed successfully." | tee -a "$MLOG"
 
 # Provide a shim for missing QtQuick.Effects.RectangularShadow (wraps MultiEffect)
-OVR_DIR=/usr/local/share/quickshell-overrides/QtQuick/Effects
-sudo install -d -m 755 "$OVR_DIR"
-sudo tee "$OVR_DIR/RectangularShadow.qml" >/dev/null <<'QML'
+OVR_DIR="$DESTDIR$INSTALL_PREFIX/share/quickshell-overrides/QtQuick/Effects"
+$(install_sudo) install -d -m 755 "$OVR_DIR"
+$(install_sudo) tee "$OVR_DIR/RectangularShadow.qml" >/dev/null <<'QML'
 import QtQuick
 import QtQuick.Effects
 
@@ -257,16 +275,16 @@ Item {
 QML
 
 # Install a wrapper to run Quickshell with system QML imports (avoids Nix/Flatpak overrides)
-WRAP=/usr/local/bin/qs-system
-sudo tee "$WRAP" >/dev/null <<'EOSH'
+WRAP="$DESTDIR$INSTALL_PREFIX/bin/qs-system"
+$(install_sudo) tee "$WRAP" >/dev/null <<EOSH
 #!/usr/bin/env bash
 # Run Quickshell preferring system Qt6 QML modules and overrides
-OVR=/usr/local/share/quickshell-overrides
-export QML_IMPORT_PATH="$OVR${QML_IMPORT_PATH:+:$QML_IMPORT_PATH}"
-export QML2_IMPORT_PATH="$OVR${QML2_IMPORT_PATH:+:$QML2_IMPORT_PATH}"
-exec qs "$@"
+OVR=$INSTALL_PREFIX/share/quickshell-overrides
+export QML_IMPORT_PATH="\$OVR\${QML_IMPORT_PATH:+:\$QML_IMPORT_PATH}"
+export QML2_IMPORT_PATH="\$OVR\${QML2_IMPORT_PATH:+:\$QML2_IMPORT_PATH}"
+exec qs "\$@"
 EOSH
-sudo chmod +x "$WRAP" || true
+$(install_sudo) chmod +x "$WRAP" || true
 
 # Build logs already written to $PARENT_DIR/Install-Logs
 # Keep source directory for reference in case user wants to rebuild later

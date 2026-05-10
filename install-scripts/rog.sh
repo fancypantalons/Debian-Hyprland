@@ -55,7 +55,7 @@ install_and_log() {
     source "$HOME/.cargo/env"
     make
 
-    if sudo make install 2>&1 | tee -a "$LOG"; then
+    if $(install_sudo) env $(install_destdir_env) make install 2>&1 | tee -a "$LOG"; then
       printf "${OK} $project_name installed successfully.\n"
       if [ "$project_name" == "supergfxctl" ]; then
         # Enable supergfxctl

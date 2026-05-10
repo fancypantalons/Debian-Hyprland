@@ -8,9 +8,9 @@
 # This script is cleaning up previous manual installation files / directories
 
 # 22 Aug 2024
-# Files to be removed from /usr/local/bin
-
-TARGET_DIR="/usr/local/bin"
+# Files to be removed from previous install locations.
+# Includes legacy /usr/local/bin (older installer versions) and the current
+# $INSTALL_PREFIX/bin (set in Global_functions.sh, sourced below).
 
 # Define packages to manually remove (was manually installed previously)
 PACKAGES=(
@@ -82,19 +82,24 @@ fi
 # Set the name of the log file to include the current date and time
 LOG="Install-Logs/install-$(date +%d-%H%M%S)_pre-clean-up.log"
 
-# Loop through the list of packages
-for PKG_NAME in "${PACKAGES[@]}"; do
-  # Construct the full path to the file
-  FILE_PATH="$TARGET_DIR/$PKG_NAME"
+# Cleanup target dirs: legacy /usr/local/bin (older installer versions) and current $INSTALL_PREFIX/bin.
+# Deduplicate in case INSTALL_PREFIX is /usr/local.
+TARGET_DIRS=("/usr/local/bin")
+if [ "$INSTALL_PREFIX/bin" != "/usr/local/bin" ]; then
+  TARGET_DIRS+=("$INSTALL_PREFIX/bin")
+fi
 
-  # Check if the file exists
-  if [[ -f "$FILE_PATH" ]]; then
-    # Delete the file
-    sudo rm "$FILE_PATH"
-    echo "Deleted: $FILE_PATH" 2>&1 | tee -a "$LOG"
-  else
-    echo "File not found: $FILE_PATH" 2>&1 | tee -a "$LOG"
-  fi
+# Loop through the list of packages across all target dirs
+for TARGET_DIR in "${TARGET_DIRS[@]}"; do
+  for PKG_NAME in "${PACKAGES[@]}"; do
+    FILE_PATH="$TARGET_DIR/$PKG_NAME"
+    if [[ -f "$FILE_PATH" ]]; then
+      sudo rm "$FILE_PATH"
+      echo "Deleted: $FILE_PATH" 2>&1 | tee -a "$LOG"
+    else
+      echo "File not found: $FILE_PATH" 2>&1 | tee -a "$LOG"
+    fi
+  done
 done
 
 

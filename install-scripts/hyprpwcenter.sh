@@ -74,19 +74,19 @@ EOF
     fi
 
     if [ -f CMakeLists.txt ]; then
-        cmake -S . -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=23 "${EXTRA_FLAGS[@]}"
+        cmake -S . -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=23 -DCMAKE_INSTALL_PREFIX="$INSTALL_PREFIX" "${EXTRA_FLAGS[@]}"
         cmake --build "$BUILD_DIR" -j "$(nproc 2>/dev/null || getconf _NPROCESSORS_CONF)"
-        if [ $DO_INSTALL -eq 1 ]; then sudo cmake --install "$BUILD_DIR" 2>&1 | tee -a "$MLOG"; else echo "${NOTE} DRY RUN: skip install" | tee -a "$MLOG"; fi
+        if [ $DO_INSTALL -eq 1 ]; then $(install_sudo) env $(install_destdir_env) cmake --install "$BUILD_DIR" 2>&1 | tee -a "$MLOG"; else echo "${NOTE} DRY RUN: skip install" | tee -a "$MLOG"; fi
     elif [ -f meson.build ]; then
-        meson setup "$BUILD_DIR" --buildtype=release
+        meson setup "$BUILD_DIR" --buildtype=release --prefix="$INSTALL_PREFIX"
         meson compile -C "$BUILD_DIR"
-        if [ $DO_INSTALL -eq 1 ]; then sudo meson install -C "$BUILD_DIR" 2>&1 | tee -a "$MLOG"; else echo "${NOTE} DRY RUN: skip install" | tee -a "$MLOG"; fi
+        if [ $DO_INSTALL -eq 1 ]; then $(install_sudo) env $(install_destdir_env) meson install -C "$BUILD_DIR" 2>&1 | tee -a "$MLOG"; else echo "${NOTE} DRY RUN: skip install" | tee -a "$MLOG"; fi
     elif [ -f Cargo.toml ]; then
         cargo build --release 2>&1 | tee -a "$MLOG"
         if [ $DO_INSTALL -eq 1 ]; then
             # Install common cargo-built binary name if present
             BIN="$(basename "$(pwd)")"
-            [ -f target/release/$BIN ] && sudo install -Dm755 target/release/$BIN "/usr/local/bin/$BIN"
+            [ -f target/release/$BIN ] && $(install_sudo) install -Dm755 target/release/$BIN "$DESTDIR$INSTALL_PREFIX/bin/$BIN"
         fi
     else
         echo "${ERROR} Unknown build system for hyprpwcenter" | tee -a "$MLOG"

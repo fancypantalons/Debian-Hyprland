@@ -97,15 +97,15 @@ fi
 
 cd "$SRC_DIR" || exit 1
 
-# Ensure pkg-config can see /usr/local for wayland-protocols and others
-export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:/usr/local/share/pkgconfig:${PKG_CONFIG_PATH:-}"
+# Ensure pkg-config can see locally-built wayland-protocols and others
+export PKG_CONFIG_PATH="$DESTDIR$INSTALL_PREFIX/lib/pkgconfig:$INSTALL_PREFIX/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
 
 # Proceed with the installation steps
 BUILD_DIR="$BUILD_ROOT/rofi-${rofi_ver}"
 rm -rf "$BUILD_DIR" && mkdir -p "$BUILD_DIR"
 # Build both backends if available
-if meson setup "$BUILD_DIR" --prefix /usr/local -Dxcb=enabled -Dwayland=enabled && ninja -C "$BUILD_DIR" ; then
-  if sudo ninja -C "$BUILD_DIR" install 2>&1 | tee -a "$MLOG"; then
+if meson setup "$BUILD_DIR" --prefix "$INSTALL_PREFIX" -Dxcb=enabled -Dwayland=enabled && ninja -C "$BUILD_DIR" ; then
+  if $(install_sudo) env $(install_destdir_env) ninja -C "$BUILD_DIR" install 2>&1 | tee -a "$MLOG"; then
     printf "${OK} rofi $rofi_ver installed successfully.\n" 2>&1 | tee -a "$MLOG"
   else
     echo -e "${ERROR} Installation failed for ${YELLOW}rofi $rofi_tag${RESET}" 2>&1 | tee -a "$MLOG"

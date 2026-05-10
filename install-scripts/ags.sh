@@ -54,8 +54,8 @@ fi
 LOG="Install-Logs/install-$(date +%d-%H%M%S)_ags.log"
 MLOG="install-$(date +%d-%H%M%S)_ags2.log"
 
-# Check if AGS is installed
-if command -v ags &>/dev/null; then
+# Check if AGS is installed (skip interactive prompt in DESTDIR package builds)
+if [ -z "$DESTDIR" ] && command -v ags &>/dev/null; then
     AGS_VERSION=$(ags -v | awk '{print $NF}')
     if [[ "$AGS_VERSION" == "1.9.0" ]]; then
         printf "${INFO} ${MAGENTA}Aylur's GTK Shell v1.9.0${RESET} is already installed.\n"
@@ -98,33 +98,37 @@ for PKG1 in "${build_dep[@]}"; do
   build_dep "$PKG1" "$LOG"
 done
 
-# install typescript by npm if tsc is missing or too old
-needs_tsc_install=0
-if command -v tsc >/dev/null 2>&1; then
-  tsc_version="$(tsc --version 2>/dev/null | awk '{print $2}')"
-  if [ -n "$tsc_version" ]; then
-    # ags >= 1.9 requires TypeScript >= 5.0 for 'const' type modifiers
-    major_ver="$(echo "$tsc_version" | cut -d. -f1 | grep -oE '^[0-9]+' || echo 0)"
-    if [ "$major_ver" -lt 5 ]; then
-      printf "${INFO} TypeScript compiler detected (v%s) but is too old (needs >= 5). Proceeding with install.\\n" "$tsc_version"
-      needs_tsc_install=1
+# install typescript by npm if tsc is missing or too old (skipped in DESTDIR builds — Build-Depends handles it)
+if [ -n "$DESTDIR" ]; then
+  printf "${INFO} Skipping npm install of typescript (DESTDIR build; handled by Build-Depends).\n"
+else
+  needs_tsc_install=0
+  if command -v tsc >/dev/null 2>&1; then
+    tsc_version="$(tsc --version 2>/dev/null | awk '{print $2}')"
+    if [ -n "$tsc_version" ]; then
+      # ags >= 1.9 requires TypeScript >= 5.0 for 'const' type modifiers
+      major_ver="$(echo "$tsc_version" | cut -d. -f1 | grep -oE '^[0-9]+' || echo 0)"
+      if [ "$major_ver" -lt 5 ]; then
+        printf "${INFO} TypeScript compiler detected (v%s) but is too old (needs >= 5). Proceeding with install.\\n" "$tsc_version"
+        needs_tsc_install=1
+      else
+        printf "${INFO} TypeScript compiler detected (v%s). Skipping global install.\\n" "$tsc_version"
+      fi
     else
-      printf "${INFO} TypeScript compiler detected (v%s). Skipping global install.\\n" "$tsc_version"
+      printf "${INFO} TypeScript compiler detected. Skipping global install.\\n"
     fi
   else
-    printf "${INFO} TypeScript compiler detected. Skipping global install.\\n"
+    needs_tsc_install=1
   fi
-else
-  needs_tsc_install=1
-fi
 
-if [ "$needs_tsc_install" -eq 1 ]; then
-  # Purge older apt version if present to avoid conflicts
-  if dpkg -l | grep -q "^ii  node-typescript"; then
-    printf "${INFO} Removing old apt package node-typescript...\\n"
-    sudo apt-get purge -y node-typescript 2>&1 | tee -a "$LOG"
+  if [ "$needs_tsc_install" -eq 1 ]; then
+    # Purge older apt version if present to avoid conflicts
+    if dpkg -l | grep -q "^ii  node-typescript"; then
+      printf "${INFO} Removing old apt package node-typescript...\\n"
+      sudo apt-get purge -y node-typescript 2>&1 | tee -a "$LOG"
+    fi
+    sudo npm install --global --prefix /usr/local typescript 2>&1 | tee -a "$LOG"
   fi
-  sudo npm install --global --prefix /usr/local typescript 2>&1 | tee -a "$LOG"
 fi
 
 # ags v1
@@ -196,56 +200,54 @@ for old in old_variants:
 path.write_text(text)
 PY
     fi
-    meson setup "$BUILD_DIR"
-    sudo meson install -C "$BUILD_DIR" 2>&1 | tee -a "$MLOG"
-    meson_status=${PIPESTATUS[0]}
-   if [ "$meson_status" -eq 0 ]; then
+    meson setup "$BUILD_DIR" --prefix="$INSTALL_PREFIX"
+   if $(install_sudo) env $(install_destdir_env) meson install -C "$BUILD_DIR" 2>&1 | tee -a "$MLOG"; then
     printf "\n${OK} ${YELLOW}Aylur's GTK shell $ags_tag${RESET} installed successfully.\n" 2>&1 | tee -a "$MLOG"
 
-    # Patch installed AGS launchers to ensure GI typelibs in /usr/local/lib are discoverable in GJS ESM
+    # Patch installed AGS launchers to ensure GI typelibs in $INSTALL_PREFIX/lib are discoverable in GJS ESM
     printf "${NOTE} Applying AGS launcher patch for GI typelibs search path...\n"
 
     patch_ags_launcher() {
       local target="$1"
-      if ! sudo test -f "$target"; then
+      if ! [ -f "$target" ]; then
         return 1
       fi
 
       # 1) Remove deprecated GIR Repository path tweaks and GIRepository import (harmless if absent)
-      sudo sed -i \
+      $(install_sudo) sed -i \
         -e '/Repository\.prepend_search_path/d' \
         -e '/Repository\.prepend_library_path/d' \
         -e '/gi:\/\/GIRepository/d' \
         "$target"
 
       # 2) Ensure GLib import exists (insert after first import line, or at top if none)
-      if ! sudo grep -q '^import GLib from "gi://GLib";' "$target"; then
-        TMPF=$(sudo mktemp)
-        sudo awk 'BEGIN{added=0} {
+      if ! $(install_sudo) grep -q '^import GLib from "gi://GLib";' "$target"; then
+        TMPF=$($(install_sudo) mktemp)
+        $(install_sudo) awk 'BEGIN{added=0} {
           if (!added && $0 ~ /^import /) { print; print "import GLib from \"gi://GLib\";"; added=1; next }
           print
-        } END { if (!added) print "import GLib from \"gi://GLib\";" }' "$target" | sudo tee "$TMPF" >/dev/null
-        sudo mv "$TMPF" "$target"
+        } END { if (!added) print "import GLib from \"gi://GLib\";" }' "$target" | $(install_sudo) tee "$TMPF" >/dev/null
+        $(install_sudo) mv "$TMPF" "$target"
       fi
 
       # 3) Inject GI_TYPELIB_PATH export right after the GLib import (once)
-      if ! sudo grep -q 'GLib.setenv("GI_TYPELIB_PATH"' "$target"; then
-        TMPF=$(sudo mktemp)
-        sudo awk '{print} $0 ~ /^import GLib from "gi:\/\/GLib";$/ {print "const __old = GLib.getenv(\"GI_TYPELIB_PATH\");"; print "GLib.setenv(\"GI_TYPELIB_PATH\", \"/usr/local/lib/x86_64-linux-gnu:/usr/local/lib64:/usr/local/lib:/usr/local/lib64/girepository-1.0:/usr/local/lib/girepository-1.0:/usr/local/lib/x86_64-linux-gnu/girepository-1.0:/usr/lib/x86_64-linux-gnu/girepository-1.0:/usr/lib/girepository-1.0:/usr/lib/ags:/usr/local/lib/ags:/usr/lib64/ags\" + (__old ? \":\" + __old : \"\"), true);"; print "const __oldld = GLib.getenv(\"LD_LIBRARY_PATH\");"; print "GLib.setenv(\"LD_LIBRARY_PATH\", \"/usr/local/lib/x86_64-linux-gnu:/usr/local/lib64:/usr/local/lib\" + (__oldld ? \":\" + __oldld : \"\"), true);"}' "$target" | sudo tee "$TMPF" >/dev/null
-        sudo mv "$TMPF" "$target"
+      if ! $(install_sudo) grep -q 'GLib.setenv("GI_TYPELIB_PATH"' "$target"; then
+        TMPF=$($(install_sudo) mktemp)
+        $(install_sudo) awk -v prefix="$INSTALL_PREFIX" '{print} $0 ~ /^import GLib from "gi:\/\/GLib";$/ {print "const __old = GLib.getenv(\"GI_TYPELIB_PATH\");"; print "GLib.setenv(\"GI_TYPELIB_PATH\", \"" prefix "/lib/x86_64-linux-gnu:" prefix "/lib64:" prefix "/lib:" prefix "/lib64/girepository-1.0:" prefix "/lib/girepository-1.0:" prefix "/lib/x86_64-linux-gnu/girepository-1.0:/usr/lib/x86_64-linux-gnu/girepository-1.0:/usr/lib/girepository-1.0:/usr/lib/ags:" prefix "/lib/ags:/usr/lib64/ags\" + (__old ? \":\" + __old : \"\"), true);"; print "const __oldld = GLib.getenv(\"LD_LIBRARY_PATH\");"; print "GLib.setenv(\"LD_LIBRARY_PATH\", \"" prefix "/lib/x86_64-linux-gnu:" prefix "/lib64:" prefix "/lib\" + (__oldld ? \":\" + __oldld : \"\"), true);"}' "$target" | $(install_sudo) tee "$TMPF" >/dev/null
+        $(install_sudo) mv "$TMPF" "$target"
       fi
 
       # 4) Ensure LD_LIBRARY_PATH export exists even if GI_TYPELIB_PATH was already present
-      if ! sudo grep -q 'GLib.setenv("LD_LIBRARY_PATH"' "$target"; then
-        TMPF=$(sudo mktemp)
-        sudo awk '{print} $0 ~ /^import GLib from "gi:\/\/GLib";$/ {print "const __oldld = GLib.getenv(\"LD_LIBRARY_PATH\");"; print "GLib.setenv(\"LD_LIBRARY_PATH\", \"/usr/local/lib64:/usr/local/lib\" + (__oldld ? \":\" + __oldld : \"\"), true);"}' "$target" | sudo tee "$TMPF" >/dev/null
-        sudo mv "$TMPF" "$target"
+      if ! $(install_sudo) grep -q 'GLib.setenv("LD_LIBRARY_PATH"' "$target"; then
+        TMPF=$($(install_sudo) mktemp)
+        $(install_sudo) awk -v prefix="$INSTALL_PREFIX" '{print} $0 ~ /^import GLib from "gi:\/\/GLib";$/ {print "const __oldld = GLib.getenv(\"LD_LIBRARY_PATH\");"; print "GLib.setenv(\"LD_LIBRARY_PATH\", \"" prefix "/lib64:" prefix "/lib\" + (__oldld ? \":\" + __oldld : \"\"), true);"}' "$target" | $(install_sudo) tee "$TMPF" >/dev/null
+        $(install_sudo) mv "$TMPF" "$target"
       fi
 
       # Restore executable bit for bin wrappers (mv from mktemp resets mode to 0600)
       case "$target" in
         */bin/ags)
-          sudo chmod 0755 "$target" || true
+          $(install_sudo) chmod 0755 "$target" || true
           ;;
       esac
 
@@ -253,40 +255,49 @@ PY
       return 0
     }
 
-    # Try common locations
+    # Try common locations — system paths only when doing a live install
     for CAND in \
-      "/usr/local/share/com.github.Aylur.ags/com.github.Aylur.ags" \
-      "/usr/share/com.github.Aylur.ags/com.github.Aylur.ags" \
-      "/usr/local/bin/ags" \
-      "/usr/bin/ags"; do
+      "$DESTDIR$INSTALL_PREFIX/share/com.github.Aylur.ags/com.github.Aylur.ags" \
+      "$DESTDIR$INSTALL_PREFIX/bin/ags"; do
       patch_ags_launcher "$CAND" || true
     done
+    if [ -z "$DESTDIR" ]; then
+      for CAND in \
+        "/usr/share/com.github.Aylur.ags/com.github.Aylur.ags" \
+        "/usr/bin/ags"; do
+        patch_ags_launcher "$CAND" || true
+      done
+    fi
 
     # Create an env-setting wrapper for AGS to ensure GI typelibs/libs are discoverable
-    printf "${NOTE} Creating env wrapper /usr/local/bin/ags...\n"
-    sudo tee /usr/local/bin/ags >/dev/null <<'WRAP'
+    printf "${NOTE} Creating env wrapper $INSTALL_PREFIX/bin/ags...\n"
+    $(install_sudo) mkdir -p "$(dirname "$DESTDIR$INSTALL_PREFIX/bin/ags")"
+    $(install_sudo) tee "$DESTDIR$INSTALL_PREFIX/bin/ags" >/dev/null <<WRAP
 #!/usr/bin/env bash
 set -euo pipefail
-cd "$HOME" 2>/dev/null || true
+cd "\$HOME" 2>/dev/null || true
 # Locate AGS ESM entry
-MAIN_JS="/usr/local/share/com.github.Aylur.ags/com.github.Aylur.ags"
-if [ ! -f "$MAIN_JS" ]; then
+MAIN_JS="$INSTALL_PREFIX/share/com.github.Aylur.ags/com.github.Aylur.ags"
+if [ ! -f "\$MAIN_JS" ]; then
   MAIN_JS="/usr/share/com.github.Aylur.ags/com.github.Aylur.ags"
 fi
-if [ ! -f "$MAIN_JS" ]; then
-  echo "Unable to find AGS entry script (com.github.Aylur.ags) in /usr/local/share or /usr/share" >&2
+if [ ! -f "\$MAIN_JS" ]; then
+  echo "Unable to find AGS entry script (com.github.Aylur.ags) in ${INSTALL_PREFIX}/share or /usr/share" >&2
   exit 1
 fi
 # Ensure GI typelibs and native libs are discoverable before gjs ESM loads
-export GI_TYPELIB_PATH="/usr/local/lib/x86_64-linux-gnu:/usr/local/lib64:/usr/local/lib:/usr/local/lib64/girepository-1.0:/usr/local/lib/girepository-1.0:/usr/local/lib/x86_64-linux-gnu/girepository-1.0:/usr/lib/x86_64-linux-gnu/girepository-1.0:/usr/lib/girepository-1.0:/usr/lib64/girepository-1.0:/usr/lib/ags:/usr/local/lib/ags:/usr/lib64/ags:${GI_TYPELIB_PATH-}"
-export LD_LIBRARY_PATH="/usr/local/lib/x86_64-linux-gnu:/usr/local/lib64:/usr/local/lib:${LD_LIBRARY_PATH-}"
-exec /usr/bin/gjs -m "$MAIN_JS" "$@"
+export GI_TYPELIB_PATH="$INSTALL_PREFIX/lib/x86_64-linux-gnu:$INSTALL_PREFIX/lib64:$INSTALL_PREFIX/lib:$INSTALL_PREFIX/lib64/girepository-1.0:$INSTALL_PREFIX/lib/girepository-1.0:$INSTALL_PREFIX/lib/x86_64-linux-gnu/girepository-1.0:/usr/lib/x86_64-linux-gnu/girepository-1.0:/usr/lib/girepository-1.0:/usr/lib64/girepository-1.0:/usr/lib/ags:$INSTALL_PREFIX/lib/ags:/usr/lib64/ags:\${GI_TYPELIB_PATH-}"
+export LD_LIBRARY_PATH="$INSTALL_PREFIX/lib/x86_64-linux-gnu:$INSTALL_PREFIX/lib64:$INSTALL_PREFIX/lib:\${LD_LIBRARY_PATH-}"
+exec /usr/bin/gjs -m "\$MAIN_JS" "\$@"
 WRAP
-    sudo chmod 0755 /usr/local/bin/ags
+    $(install_sudo) chmod 0755 "$DESTDIR$INSTALL_PREFIX/bin/ags"
     # Ensure ESM entry is readable by gjs
-    sudo chmod 0644 /usr/local/share/com.github.Aylur.ags/com.github.Aylur.ags 2>/dev/null || true
-    sudo chmod 0644 /usr/share/com.github.Aylur.ags/com.github.Aylur.ags 2>/dev/null || true
-    printf "${OK} AGS wrapper installed at /usr/local/bin/ags\n"
+    $(install_sudo) chmod 0644 "$DESTDIR$INSTALL_PREFIX/share/com.github.Aylur.ags/com.github.Aylur.ags" 2>/dev/null || true
+    # Distro fallback: only chmod the live system path during a non-staging install.
+    if [ -z "$DESTDIR" ]; then
+      sudo chmod 0644 /usr/share/com.github.Aylur.ags/com.github.Aylur.ags 2>/dev/null || true
+    fi
+    printf "${OK} AGS wrapper installed at $INSTALL_PREFIX/bin/ags\n"
   else
     echo -e "\n${ERROR} ${YELLOW}Aylur's GTK shell $ags_tag${RESET} Installation failed\n " 2>&1 | tee -a "$MLOG"
    fi

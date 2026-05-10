@@ -42,8 +42,11 @@ fi
 LOG="Install-Logs/install-$(date +%d-%H%M%S)_xdph.log"
 MLOG="install-$(date +%d-%H%M%S)_xdph2.log"
 
-# Check if the file exists and remove it
-[[ -f "/usr/lib/xdg-desktop-portal-hyprland" ]] && sudo rm "/usr/lib/xdg-desktop-portal-hyprland"
+# Remove stale binary from a previous live install (not needed in DESTDIR builds —
+# the cmake install goes to the staging tree, not /usr/lib).
+if [ -z "$DESTDIR" ] && [[ -f "/usr/lib/xdg-desktop-portal-hyprland" ]]; then
+  sudo rm "/usr/lib/xdg-desktop-portal-hyprland"
+fi
 
 # XDG-DESKTOP-PORTAL-HYPRLAND
 printf "${NOTE} Installing ${SKY_BLUE}xdg-desktop-portal-hyprland dependencies${RESET}\n\n" 
@@ -70,9 +73,9 @@ if git clone --recursive -b $tag "https://github.com/hyprwm/xdg-desktop-portal-h
   cd "$SRC_DIR" || exit 1
   BUILD_DIR="$BUILD_ROOT/xdg-desktop-portal-hyprland"
   rm -rf "$BUILD_DIR" && mkdir -p "$BUILD_DIR"
-  cmake -DCMAKE_INSTALL_LIBEXECDIR=/usr/lib -DCMAKE_INSTALL_PREFIX=/usr -B "$BUILD_DIR"
+  cmake -DCMAKE_INSTALL_LIBEXECDIR=$INSTALL_PREFIX/lib -DCMAKE_INSTALL_PREFIX=$INSTALL_PREFIX -B "$BUILD_DIR"
   cmake --build "$BUILD_DIR"
-  if sudo cmake --install "$BUILD_DIR" 2>&1 | tee -a "$MLOG"; then
+  if $(install_sudo) env $(install_destdir_env) cmake --install "$BUILD_DIR" 2>&1 | tee -a "$MLOG"; then
     printf "${OK} ${MAGENTA}xdph $tag${RESET} installed successfully.\n" 2>&1 | tee -a "$MLOG"
   else
     echo -e "${ERROR} Installation failed for ${YELLOW}xdph $tag${RESET}" 2>&1 | tee -a "$MLOG"

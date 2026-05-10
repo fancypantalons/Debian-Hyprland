@@ -1,0 +1,57 @@
+#!/usr/bin/make -f
+
+# Monolithic Debian package build for the Hyprland ecosystem bundle.
+# The actual build/install logic lives in package-build.sh, which invokes
+# the existing install-scripts/*.sh with INSTALL_PREFIX and DESTDIR set.
+
+export INSTALL_PREFIX = /usr
+export DESTDIR = $(CURDIR)/debian/debian-hyprland
+
+# Pass through resume support. Set START_MODULE=<name> in the calling env to
+# skip modules already built into $(DESTDIR) from a previous run (combine with
+# `dpkg-buildpackage -nc` so we don't wipe the staging tree first).
+ifdef START_MODULE
+export START_MODULE
+
+# When resuming, also skip dh_prep — it removes debian/<package>/, which
+# would wipe the staging tree we're trying to reuse. dpkg-buildpackage -nc
+# alone is insufficient because dh_prep runs as part of the `binary` target,
+# not the `clean` target.
+override_dh_prep:
+	@echo "[debian/rules] Skipping dh_prep (START_MODULE=$(START_MODULE) — preserving staging tree)."
+endif
+
+# Verbose build output to install.log; useful when packaging fails.
+export DH_VERBOSE = 1
+
+# This build pulls sources from git/cargo/npm at build time. It is NOT
+# offline-capable. Don't try to build it under sbuild without --enable-network.
+
+%:
+	dh $@
+
+override_dh_auto_configure:
+	# Each install-script handles its own configure step.
+
+override_dh_auto_build:
+	# Build happens in override_dh_auto_install — package-build.sh both
+	# builds and stages into $(DESTDIR), and dh_prep (run from dh binary,
+	# before dh_auto_install) wipes $(DESTDIR). Doing the work in
+	# override_dh_auto_build means everything we stage is deleted before
+	# dh_builddeb assembles the package — yielding an empty .deb.
+
+override_dh_auto_install:
+	mkdir -p "$(DESTDIR)"
+	./package-build.sh
+
+override_dh_auto_test:
+	# No tests for this bundle.
+
+override_dh_auto_clean:
+	rm -rf build/ Install-Logs/ debian/debian-hyprland/ debian/files debian/.debhelper
+
+override_dh_shlibdeps:
+	# Lower the shlibdeps failure threshold to a warning. Many components
+	# pull in private Qt6 / hyprutils libs that dh_shlibdeps has trouble
+	# resolving cleanly without --ignore-missing-info; keep going on warning.
+	dh_shlibdeps --dpkg-shlibdeps-params=--ignore-missing-info || true

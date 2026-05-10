@@ -36,29 +36,23 @@ if git clone --recursive ${git_ref:+-b "$git_ref"} https://github.com/hyprwm/hyp
     # Ensure submodules and tools are ready
     git submodule update --init --recursive || true
 
-    # Make sure CMake/pkg-config find /usr/local installs (hyprland-protocols, hyprwayland-scanner, etc.)
-    export PATH="/usr/local/bin:${PATH}"
-    # Prepend /usr/local pkg-config paths so locally installed pc files are preferred
-    if [[ ":${PKG_CONFIG_PATH:-}:" != *":/usr/local/share/pkgconfig:"* ]]; then
-        export PKG_CONFIG_PATH="/usr/local/share/pkgconfig:${PKG_CONFIG_PATH:-}"
-    fi
-    if [[ ":${PKG_CONFIG_PATH}:" != *":/usr/local/lib/pkgconfig:"* ]]; then
-        export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:${PKG_CONFIG_PATH}"
-    fi
-    export CMAKE_PREFIX_PATH="/usr/local:${CMAKE_PREFIX_PATH:-}"
+    # Make sure CMake/pkg-config find locally-built installs
+    export PATH="$DESTDIR$INSTALL_PREFIX/bin:$INSTALL_PREFIX/bin:${PATH}"
+    export PKG_CONFIG_PATH="$DESTDIR$INSTALL_PREFIX/lib/pkgconfig:$INSTALL_PREFIX/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+    export CMAKE_PREFIX_PATH="$DESTDIR$INSTALL_PREFIX:$INSTALL_PREFIX:${CMAKE_PREFIX_PATH:-}"
 
     # Ensure required protocol packages and scanner are installed when running this module standalone
     need_wl=0; need_hl=0; need_wlr=0; need_scanner=0
     # wayland-protocols check (look for a well-known file)
-    if ! [ -f /usr/local/share/wayland-protocols/stable/xdg-shell/xdg-shell.xml ] && ! [ -f /usr/share/wayland-protocols/stable/xdg-shell/xdg-shell.xml ]; then
+    if ! [ -f "$DESTDIR$INSTALL_PREFIX/share/wayland-protocols/stable/xdg-shell/xdg-shell.xml" ] && ! [ -f "$INSTALL_PREFIX/share/wayland-protocols/stable/xdg-shell/xdg-shell.xml" ] && ! [ -f /usr/share/wayland-protocols/stable/xdg-shell/xdg-shell.xml ]; then
         need_wl=1
     fi
     # hyprland-protocols check (repo installs to share/hyprland-protocols)
-    if ! [ -d /usr/local/share/hyprland-protocols ] && ! [ -d /usr/share/hyprland-protocols ]; then
+    if ! [ -d "$DESTDIR$INSTALL_PREFIX/share/hyprland-protocols" ] && ! [ -d "$INSTALL_PREFIX/share/hyprland-protocols" ] && ! [ -d /usr/share/hyprland-protocols ]; then
         need_hl=1
     fi
     # wlr-protocols check
-    if ! [ -d /usr/share/wlr-protocols ] && ! [ -d /usr/local/share/wlr-protocols ]; then
+    if ! [ -d /usr/share/wlr-protocols ] && ! [ -d "$INSTALL_PREFIX/share/wlr-protocols" ] && ! [ -d "$DESTDIR$INSTALL_PREFIX/share/wlr-protocols" ]; then
         # optional on some distros but used by projects; install if missing
         need_wlr=1
     fi
@@ -77,7 +71,7 @@ if git clone --recursive ${git_ref:+-b "$git_ref"} https://github.com/hyprwm/hyp
     fi
     if [ $need_wlr -eq 1 ]; then
         # Prefer distro package if available
-        if sudo apt-get update -y >/dev/null 2>&1 && apt-cache show wlr-protocols >/dev/null 2>&1; then
+        if [ -z "$DESTDIR" ] && sudo apt-get update -y >/dev/null 2>&1 && apt-cache show wlr-protocols >/dev/null 2>&1; then
             echo "${NOTE} Installing missing wlr-protocols from apt..."
             sudo apt-get install -y wlr-protocols || true
         fi
@@ -104,50 +98,38 @@ if git clone --recursive ${git_ref:+-b "$git_ref"} https://github.com/hyprwm/hyp
 
     # Discover protocol directories and export env vars consumed by generator tools
     WL_PROTO_DIR=""
-    for d in /usr/local/share/wayland-protocols /usr/share/wayland-protocols; do [ -d "$d" ] && WL_PROTO_DIR="$d" && break; done
+    for d in "$DESTDIR$INSTALL_PREFIX/share/wayland-protocols" "$INSTALL_PREFIX/share/wayland-protocols" /usr/share/wayland-protocols; do [ -d "$d" ] && WL_PROTO_DIR="$d" && break; done
     HYP_PROTO_DIR=""
-    for d in /usr/local/share/hyprland-protocols /usr/share/hyprland-protocols; do [ -d "$d" ] && HYP_PROTO_DIR="$d" && break; done
+    for d in "$DESTDIR$INSTALL_PREFIX/share/hyprland-protocols" "$INSTALL_PREFIX/share/hyprland-protocols" /usr/share/hyprland-protocols; do [ -d "$d" ] && HYP_PROTO_DIR="$d" && break; done
     WLR_PROTO_DIR=""
-    for d in /usr/share/wlr-protocols /usr/local/share/wlr-protocols; do [ -d "$d" ] && WLR_PROTO_DIR="$d" && break; done
+    for d in /usr/share/wlr-protocols "$INSTALL_PREFIX/share/wlr-protocols" "$DESTDIR$INSTALL_PREFIX/share/wlr-protocols"; do [ -d "$d" ] && WLR_PROTO_DIR="$d" && break; done
     HYPRWIRE_PROTO_DIR=""
     # Prefer pkg-config for hyprwire-protocols if available
     PC_WIRE_PROTO_DIR=$(pkg-config --variable=pkgdatadir hyprwire-protocols 2>/dev/null || true)
     if [ -n "$PC_WIRE_PROTO_DIR" ] && [ -d "$PC_WIRE_PROTO_DIR" ]; then
         HYPRWIRE_PROTO_DIR="$PC_WIRE_PROTO_DIR"
     else
-        for d in /usr/local/share/hyprwire-protocols /usr/share/hyprwire-protocols; do [ -d "$d" ] && HYPRWIRE_PROTO_DIR="$d" && break; done
+        for d in "$DESTDIR$INSTALL_PREFIX/share/hyprwire-protocols" "$INSTALL_PREFIX/share/hyprwire-protocols" /usr/share/hyprwire-protocols; do [ -d "$d" ] && HYPRWIRE_PROTO_DIR="$d" && break; done
         # If we found the top-level dir, prefer its protocols/ subtree
         if [ -n "$HYPRWIRE_PROTO_DIR" ] && [ -d "$HYPRWIRE_PROTO_DIR/protocols" ]; then
             HYPRWIRE_PROTO_DIR="$HYPRWIRE_PROTO_DIR/protocols"
         fi
-        # Fallback to the checked-out source if installed dir not found
-        if [ -z "$HYPRWIRE_PROTO_DIR" ] && [ -d "$BUILD_ROOT/src/hyprwire/protocols" ]; then
-            HYPRWIRE_PROTO_DIR="$BUILD_ROOT/src/hyprwire/protocols"
-        fi
     fi
 
-    # If pkg-config still cannot provide hyprwire-protocols, synthesize a local .pc pointing to the resolved dir
-    if ! pkg-config --exists hyprwire-protocols 2>/dev/null && [ -n "$HYPRWIRE_PROTO_DIR" ]; then
-        LOCAL_PC_DIR="$BUILD_ROOT/pkgconfig"
-        mkdir -p "$LOCAL_PC_DIR"
-        # Try to read hyprwire version via pkg-config; fall back to 0.0.0
-        HW_VER=$(pkg-config --modversion hyprwire 2>/dev/null || echo "0.0.0")
-        # If we accidentally captured the parent, normalize to its protocols subtree
-        if [ -d "$HYPRWIRE_PROTO_DIR/protocols" ]; then HYPRWIRE_PROTO_DIR="$HYPRWIRE_PROTO_DIR/protocols"; fi
-        cat >"$LOCAL_PC_DIR/hyprwire-protocols.pc" <<EOF
-prefix=/usr/local
-exec_prefix=\${prefix}
-libdir=\${exec_prefix}/lib
-includedir=\${prefix}/include
-datadir=\${prefix}/share
-# Override pkgdatadir to our resolved location
-pkgdatadir=${HYPRWIRE_PROTO_DIR}
-
-Name: hyprwire-protocols
-Description: Protocol XMLs for hyprwire
-Version: ${HW_VER}
-EOF
-        export PKG_CONFIG_PATH="$LOCAL_PC_DIR:/usr/local/lib/pkgconfig:/usr/local/share/pkgconfig:${PKG_CONFIG_PATH:-}"
+    # If hyprwire-protocols still not found anywhere, install from the hyprtavern branch
+    if [ -z "$HYPRWIRE_PROTO_DIR" ] && [ -x "$PARENT_DIR/install-scripts/hyprwire-protocols.sh" ]; then
+        echo "${NOTE} Installing hyprwire-protocols from hyprtavern branch for required XMLs..."
+        HYPRWIRE_PROTOCOLS_TAG="hyprtavern" HYPRWIRE_PROTOCOLS_NEED_HYPRTAVERN=1 "$PARENT_DIR/install-scripts/hyprwire-protocols.sh"
+        # Re-discover after install
+        for d in "$DESTDIR$INSTALL_PREFIX/share/hyprwire-protocols" "$INSTALL_PREFIX/share/hyprwire-protocols" /usr/share/hyprwire-protocols; do
+            if [ -d "$d" ]; then
+                HYPRWIRE_PROTO_DIR="$d"
+                break
+            fi
+        done
+        if [ -n "$HYPRWIRE_PROTO_DIR" ] && [ -d "$HYPRWIRE_PROTO_DIR/protocols" ]; then
+            HYPRWIRE_PROTO_DIR="$HYPRWIRE_PROTO_DIR/protocols"
+        fi
     fi
 
     # If hyprtavern XMLs are missing under the resolved hyprwire protocols dir, auto-install them (branch contains XMLs)
@@ -155,16 +137,39 @@ EOF
         echo "${NOTE} hyprwire-protocols found but hyprtavern XMLs missing; installing from 'hyprtavern' branch..."
         if [ -x "$PARENT_DIR/install-scripts/hyprwire-protocols.sh" ]; then
             # Force hyprtavern branch to ensure required XMLs are installed
-            ( HYPRWIRE_PROTOCOLS_TAG="hyprtavern" HYPRWIRE_PROTOCOLS_NEED_HYPRTAVERN=1 "$PARENT_DIR/install-scripts/hyprwire-protocols.sh" ) || true
+            HYPRWIRE_PROTOCOLS_TAG="hyprtavern" HYPRWIRE_PROTOCOLS_NEED_HYPRTAVERN=1 "$PARENT_DIR/install-scripts/hyprwire-protocols.sh"
             # Re-resolve via pkg-config after install
             PC_WIRE_PROTO_DIR=$(pkg-config --variable=pkgdatadir hyprwire-protocols 2>/dev/null || true)
             if [ -n "$PC_WIRE_PROTO_DIR" ] && [ -d "$PC_WIRE_PROTO_DIR" ]; then
                 HYPRWIRE_PROTO_DIR="$PC_WIRE_PROTO_DIR"
             fi
-            if [ -d "/usr/local/share/hyprwire-protocols/protocols" ]; then
-                HYPRWIRE_PROTO_DIR="/usr/local/share/hyprwire-protocols/protocols"
+            if [ -d "$DESTDIR$INSTALL_PREFIX/share/hyprwire-protocols/protocols" ]; then
+                HYPRWIRE_PROTO_DIR="$DESTDIR$INSTALL_PREFIX/share/hyprwire-protocols/protocols"
             fi
         fi
+    fi
+
+    # Synthesize a local .pc with the resolved DESTDIR-prefixed pkgdatadir.
+    # The default .pc from hyprwire-protocols.sh uses the system (non-DESTDIR)
+    # path, which CMake's pkg_get_variable would pick up — causing hyprwire-scanner
+    # to look in /usr/share instead of the staging tree.
+    if [ -n "$HYPRWIRE_PROTO_DIR" ]; then
+        LOCAL_PC_DIR="$BUILD_ROOT/pkgconfig"
+        mkdir -p "$LOCAL_PC_DIR"
+        HW_VER=$(pkg-config --modversion hyprwire 2>/dev/null || echo "0.0.0")
+        cat >"$LOCAL_PC_DIR/hyprwire-protocols.pc" <<EOF
+prefix=$INSTALL_PREFIX
+exec_prefix=\${prefix}
+libdir=\${exec_prefix}/lib
+includedir=\${prefix}/include
+datadir=\${prefix}/share
+pkgdatadir=${HYPRWIRE_PROTO_DIR}
+
+Name: hyprwire-protocols
+Description: Protocol XMLs for hyprwire
+Version: ${HW_VER}
+EOF
+        export PKG_CONFIG_PATH="$LOCAL_PC_DIR:$DESTDIR$INSTALL_PREFIX/lib/pkgconfig:$INSTALL_PREFIX/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
     fi
 
     # Export for hyprwayland-scanner/wayland-scanner invoked by the build
@@ -210,6 +215,7 @@ EOF
         CMAKE_FLAGS=(
             -DCMAKE_BUILD_TYPE=Release
             -DCMAKE_CXX_STANDARD=23
+            -DCMAKE_INSTALL_PREFIX="$INSTALL_PREFIX"
         )
         [ -n "$WL_PROTO_DIR" ]        && CMAKE_FLAGS+=( -DWAYLAND_PROTOCOLS_DIR="$WL_PROTO_DIR" )
         [ -n "$HYP_PROTO_DIR" ]       && CMAKE_FLAGS+=( -DHYPRLAND_PROTOCOLS_DIR="$HYP_PROTO_DIR" )
@@ -217,20 +223,20 @@ EOF
         [ -n "$HYPRWIRE_PROTO_DIR" ]  && CMAKE_FLAGS+=( -DHYPRWIRE_PROTOCOLS_DIR="$HYPRWIRE_PROTO_DIR" )
         cmake -S . -B "$BUILD_DIR" "${CMAKE_FLAGS[@]}" "${EXTRA_FLAGS[@]}"
         cmake --build "$BUILD_DIR" -j "$(nproc 2>/dev/null || getconf _NPROCESSORS_CONF)"
-        if [ $DO_INSTALL -eq 1 ]; then sudo cmake --install "$BUILD_DIR" 2>&1 | tee -a "$MLOG"; else echo "${NOTE} DRY RUN: skip install" | tee -a "$MLOG"; fi
+        if [ $DO_INSTALL -eq 1 ]; then $(install_sudo) env $(install_destdir_env) cmake --install "$BUILD_DIR" 2>&1 | tee -a "$MLOG"; else echo "${NOTE} DRY RUN: skip install" | tee -a "$MLOG"; fi
     elif [ -f meson.build ]; then
-        meson setup "$BUILD_DIR" --buildtype=release \
+        meson setup "$BUILD_DIR" --buildtype=release --prefix="$INSTALL_PREFIX" \
             ${WL_PROTO_DIR:+-Dwayland_protocols_dir="$WL_PROTO_DIR"} \
             ${HYP_PROTO_DIR:+-Dhyprland_protocols_dir="$HYP_PROTO_DIR"} \
             ${WLR_PROTO_DIR:+-Dwlr_protocols_dir="$WLR_PROTO_DIR"} \
             ${HYPRWIRE_PROTO_DIR:+-Dhyprwire_protocols_dir="$HYPRWIRE_PROTO_DIR"}
         meson compile -C "$BUILD_DIR"
-        if [ $DO_INSTALL -eq 1 ]; then sudo meson install -C "$BUILD_DIR" 2>&1 | tee -a "$MLOG"; else echo "${NOTE} DRY RUN: skip install" | tee -a "$MLOG"; fi
+        if [ $DO_INSTALL -eq 1 ]; then $(install_sudo) env $(install_destdir_env) meson install -C "$BUILD_DIR" 2>&1 | tee -a "$MLOG"; else echo "${NOTE} DRY RUN: skip install" | tee -a "$MLOG"; fi
     elif [ -f Cargo.toml ]; then
         cargo build --release 2>&1 | tee -a "$MLOG"
         if [ $DO_INSTALL -eq 1 ]; then
             BIN="$(basename "$(pwd)")"
-            [ -f target/release/$BIN ] && sudo install -Dm755 target/release/$BIN "/usr/local/bin/$BIN"
+            [ -f target/release/$BIN ] && $(install_sudo) install -Dm755 target/release/$BIN "$DESTDIR$INSTALL_PREFIX/bin/$BIN"
         fi
     else
         echo "${ERROR} Unknown build system for hyprtavern" | tee -a "$MLOG"

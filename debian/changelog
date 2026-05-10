@@ -1,0 +1,7 @@
+debian-hyprland (1.0) UNRELEASED; urgency=medium
+
+  * Initial monolithic Debian package of the Hyprland ecosystem bundle.
+    Builds and installs Hypr* libraries and tools plus companion components
+    (rofi-wayland, swww, wallust, ags, quickshell) under /usr.
+
+ -- Brett Kosinski <brettk@b-ark.ca>  Sat, 09 May 2026 12:00:00 +0000

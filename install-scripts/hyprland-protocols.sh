@@ -59,9 +59,9 @@ if git clone --recursive -b $tag https://github.com/hyprwm/hyprland-protocols.gi
     cd "$SRC_DIR" || exit 1
     BUILD_DIR="$BUILD_ROOT/hyprland-protocols"
     rm -rf "$BUILD_DIR" && mkdir -p "$BUILD_DIR"
-	meson setup "$BUILD_DIR"
+	meson setup "$BUILD_DIR" --prefix="$INSTALL_PREFIX"
     if [ $DO_INSTALL -eq 1 ]; then
-        if sudo meson install -C "$BUILD_DIR" 2>&1 | tee -a "$MLOG" ; then
+        if $(install_sudo) env $(install_destdir_env) meson install -C "$BUILD_DIR" 2>&1 | tee -a "$MLOG" ; then
             printf "${OK} ${MAGENTA}hyprland-protocols $tag${RESET} installed successfully.\n" 2>&1 | tee -a "$MLOG"
         else
             echo -e "${ERROR} Installation failed for ${YELLOW}hyprland-protocols $tag${RESET}" 2>&1 | tee -a "$MLOG"

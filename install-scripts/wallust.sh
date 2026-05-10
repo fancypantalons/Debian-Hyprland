@@ -68,31 +68,36 @@ fi
 printf "\n%.0s" {1..2}
 
 # Remove any old Wallust binary only if we are rebuilding
-if [[ -f "/usr/local/bin/wallust" ]]; then
+if [ -z "$DESTDIR" ] && [ -f "$INSTALL_PREFIX/bin/wallust" ]; then
     echo "Removing existing Wallust binary..." 2>&1 | tee -a "$LOG"
-    sudo rm -f "/usr/local/bin/wallust"
+    sudo rm -f "$INSTALL_PREFIX/bin/wallust"
 fi
 
 printf "\n%.0s" {1..2}
 
 # Install Wallust using Cargo
-for WALL in "${wallust[@]}"; do
-    cargo_install "$WALL" "$LOG"
-    if [ $? -eq 0 ]; then  
+if [ -n "$DESTDIR" ]; then
+    cargo install --root "$DESTDIR$INSTALL_PREFIX" wallust
+    # cargo install leaves bookkeeping files at the root of --root; remove them
+    # so they don't end up at /usr/.crates.toml etc. inside the .deb.
+    rm -f "$DESTDIR$INSTALL_PREFIX/.crates.toml" "$DESTDIR$INSTALL_PREFIX/.crates2.json"
+    echo "${OK} ${MAGENTA}Wallust${RESET} installed to staging area." | tee -a "$LOG"
+else
+    cargo_install wallust "$LOG"
+    if [ $? -eq 0 ]; then
         echo "${OK} ${MAGENTA}Wallust${RESET} installed successfully." | tee -a "$LOG"
     else
-        echo "${ERROR} Installation of ${MAGENTA}$WALL${RESET} failed. Check the log file $LOG for details." | tee -a "$LOG"
+        echo "${ERROR} Installation of ${MAGENTA}wallust${RESET} failed. Check the log file $LOG for details." | tee -a "$LOG"
         exit 1
     fi
-done
-printf "\n%.0s" {1..1}
-# Move the newly compiled binary to /usr/local/bin
-echo "Installing Wallust binary to /usr/local/bin..." | tee -a "$LOG"
-if sudo install -m 755 "$HOME/.cargo/bin/wallust" /usr/local/bin/wallust 2>&1 | tee -a "$LOG"; then
-    echo "${OK} Wallust binary installed successfully to /usr/local/bin." | tee -a "$LOG"
-else
-    echo "${ERROR} Failed to install Wallust binary. Check the log file $LOG for details." | tee -a "$LOG"
-    exit 1
+    printf "\n%.0s" {1..1}
+    echo "Installing Wallust binary to $INSTALL_PREFIX/bin..." | tee -a "$LOG"
+    if sudo install -Dm755 "$HOME/.cargo/bin/wallust" "$INSTALL_PREFIX/bin/wallust" 2>&1 | tee -a "$LOG"; then
+        echo "${OK} Wallust binary installed successfully to $INSTALL_PREFIX/bin." | tee -a "$LOG"
+    else
+        echo "${ERROR} Failed to install Wallust binary. Check the log file $LOG for details." | tee -a "$LOG"
+        exit 1
+    fi
 fi
 
 printf "\n%.0s" {1..2}

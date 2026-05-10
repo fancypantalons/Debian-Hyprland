@@ -140,14 +140,14 @@ EOF
     # Absolute path for forced include
     APPEND_HDR="$(pwd)/append_range_compat.hpp"
 
-    cmake -S . -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local -DCMAKE_CXX_STANDARD=23 -DCMAKE_CXX_FLAGS="-include ${APPEND_HDR}"
+    cmake -S . -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=$INSTALL_PREFIX -DCMAKE_CXX_STANDARD=23 -DCMAKE_CXX_FLAGS="-include ${APPEND_HDR}"
   else
     echo "${NOTE} Toolchain supports std::vector::append_range; building hyprwire without shim."
-    cmake -S . -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local -DCMAKE_CXX_STANDARD=23
+    cmake -S . -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=$INSTALL_PREFIX -DCMAKE_CXX_STANDARD=23
   fi
   cmake --build "$BUILD_DIR" -j "$(nproc 2>/dev/null || getconf _NPROCESSORS_CONF)"
   if [ $DO_INSTALL -eq 1 ]; then
-    if sudo cmake --install "$BUILD_DIR" 2>&1 | tee -a "$MLOG" ; then
+    if $(install_sudo) env $(install_destdir_env) cmake --install "$BUILD_DIR" 2>&1 | tee -a "$MLOG" ; then
       printf "${OK} hyprwire $tag installed successfully.\n" 2>&1 | tee -a "$MLOG"
     else
       echo -e "${ERROR} Installation failed for hyprwire $tag" 2>&1 | tee -a "$MLOG"

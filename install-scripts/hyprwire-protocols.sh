@@ -32,7 +32,7 @@ source "$(dirname "$(readlink -f "$0")")/Global_functions.sh"
 LOG="Install-Logs/install-$(date +%d-%H%M%S)_hyprwire-protocols.log"
 MLOG="install-$(date +%d-%H%M%S)_hyprwire-protocols2.log"
 
-DEST_DIR="/usr/local/share/hyprwire-protocols"
+DEST_DIR="$DESTDIR$INSTALL_PREFIX/share/hyprwire-protocols"
 
 SRC_DIR="$SRC_ROOT/hyprwire-protocols"
 rm -rf "$SRC_DIR" 2>/dev/null || true
@@ -40,28 +40,27 @@ printf "${INFO} Installing ${YELLOW}hyprwire-protocols ${git_ref:-default-branch
 if git clone --recursive ${git_ref:+-b "$git_ref"} https://github.com/hyprwm/hyprwire-protocols.git "$SRC_DIR"; then
     # Protocol XMLs are expected under $SRC_DIR/hyprtavern/*.xml etc.
     if [ $DO_INSTALL -eq 1 ]; then
-        sudo install -d "$DEST_DIR"
-        sudo cp -r "$SRC_DIR"/* "$DEST_DIR/"
-        sudo chown -R root:root "$DEST_DIR"
+        $(install_sudo) install -d "$DEST_DIR"
+        $(install_sudo) cp -a "$SRC_DIR"/* "$DEST_DIR/"
         echo "${OK} Installed protocols to $DEST_DIR" | tee -a "$MLOG"
         # Synthesize a pkg-config file so CMake can discover pkgdatadir
-        PC_DIR="/usr/local/lib/pkgconfig"
-        [ -d "$PC_DIR" ] || PC_DIR="/usr/local/share/pkgconfig"
-        sudo install -d "$PC_DIR"
+        PC_DIR="$DESTDIR$INSTALL_PREFIX/lib/pkgconfig"
+        [ -d "$PC_DIR" ] || PC_DIR="$DESTDIR$INSTALL_PREFIX/share/pkgconfig"
+        $(install_sudo) install -d "$PC_DIR"
         VER="$(git -C "$SRC_DIR" describe --tags --abbrev=0 2>/dev/null || echo 0.0.0)"
         TMP_PC="$(mktemp)" && cat > "$TMP_PC" <<EOF
-prefix=/usr/local
+prefix=$INSTALL_PREFIX
 exec_prefix=\${prefix}
 libdir=\${exec_prefix}/lib
 includedir=\${prefix}/include
 datadir=\${prefix}/share
-pkgdatadir=${DEST_DIR}/protocols
+pkgdatadir=$INSTALL_PREFIX/share/hyprwire-protocols/protocols
 
 Name: hyprwire-protocols
 Description: Protocol XMLs for hyprwire-based generators
 Version: ${VER}
 EOF
-        sudo install -m644 "$TMP_PC" "$PC_DIR/hyprwire-protocols.pc"
+        $(install_sudo) install -m644 "$TMP_PC" "$PC_DIR/hyprwire-protocols.pc"
         rm -f "$TMP_PC"
       else
         echo "${NOTE} DRY RUN: would install protocols to $DEST_DIR and create hyprwire-protocols.pc" | tee -a "$MLOG"

@@ -114,27 +114,22 @@ cargo build --release 2>&1 | tee -a "$MLOG"
 file1="/usr/bin/swww"
 file2="/usr/bin/swww-daemon"
 
-# Check if file1 exists and delete if so
-if [ -f "$file1" ]; then
-    sudo rm -r "$file1"
-fi
-
-# Check if file2 exists and delete if so
-if [ -f "$file2" ]; then
-    sudo rm -r "$file2"
+# Clean up stale binaries from a previous live install.
+# Skip in DESTDIR builds — the new binaries go to the staging tree.
+if [ -z "$DESTDIR" ]; then
+  [ -f "$file1" ] && sudo rm -r "$file1"
+  [ -f "$file2" ] && sudo rm -r "$file2"
 fi
 
 # Copy binaries to /usr/bin/
-sudo cp -r target/release/swww /usr/bin/ 2>&1 | tee -a "$MLOG"
-sudo cp -r target/release/swww-daemon /usr/bin/ 2>&1 | tee -a "$MLOG"
+$(install_sudo) install -Dm755 target/release/swww "$DESTDIR$INSTALL_PREFIX/bin/swww" 2>&1 | tee -a "$MLOG"
+$(install_sudo) install -Dm755 target/release/swww-daemon "$DESTDIR$INSTALL_PREFIX/bin/swww-daemon" 2>&1 | tee -a "$MLOG"
 
 # Copy bash completions
-sudo mkdir -p /usr/share/bash-completion/completions 2>&1 | tee -a "$MLOG"
-sudo cp -r completions/swww.bash /usr/share/bash-completion/completions/swww 2>&1 | tee -a "$MLOG"
+$(install_sudo) install -Dm644 completions/swww.bash "$DESTDIR$INSTALL_PREFIX/share/bash-completion/completions/swww" 2>&1 | tee -a "$MLOG"
 
 # Copy zsh completions
-sudo mkdir -p /usr/share/zsh/site-functions 2>&1 | tee -a "$MLOG"
-sudo cp -r completions/_swww /usr/share/zsh/site-functions/_swww 2>&1 | tee -a "$MLOG"
+$(install_sudo) install -Dm644 completions/_swww "$DESTDIR$INSTALL_PREFIX/share/zsh/site-functions/_swww" 2>&1 | tee -a "$MLOG"
 
 # Moving logs into main Install-Logs
 mv "$MLOG" "$PARENT_DIR/Install-Logs/" || true

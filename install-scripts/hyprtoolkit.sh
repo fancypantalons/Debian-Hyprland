@@ -76,10 +76,10 @@ path.write_text(text)
 PY
   BUILD_DIR="$BUILD_ROOT/hyprtoolkit"
   rm -rf "$BUILD_DIR" && mkdir -p "$BUILD_DIR"
-  cmake --no-warn-unused-cli -DCMAKE_BUILD_TYPE:STRING=Release -DCMAKE_INSTALL_PREFIX:PATH=/usr/local -S . -B "$BUILD_DIR"
+  cmake --no-warn-unused-cli -DCMAKE_BUILD_TYPE:STRING=Release -DCMAKE_INSTALL_PREFIX:PATH=$INSTALL_PREFIX -S . -B "$BUILD_DIR"
   cmake --build "$BUILD_DIR" --config Release --target all -j`nproc 2>/dev/null || getconf _NPROCESSORS_CONF`
   if [ $DO_INSTALL -eq 1 ]; then
-    if sudo cmake --install "$BUILD_DIR" 2>&1 | tee -a "$MLOG"; then
+    if $(install_sudo) env $(install_destdir_env) cmake --install "$BUILD_DIR" 2>&1 | tee -a "$MLOG"; then
       printf "${OK} hyprtoolkit installed successfully.\n" 2>&1 | tee -a "$MLOG"
     else
       echo -e "${ERROR} Installation failed for hyprtoolkit." 2>&1 | tee -a "$MLOG"

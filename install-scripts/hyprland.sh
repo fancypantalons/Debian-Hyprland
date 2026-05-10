@@ -207,16 +207,16 @@ EOF
     # You can force system libs by exporting USE_SYSTEM_HYPRLIBS=1 before running this script.
     USE_SYSTEM=${USE_SYSTEM_HYPRLIBS:-1}
   if [ "$USE_SYSTEM" = "1" ]; then
-    export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:/usr/local/share/pkgconfig:${PKG_CONFIG_PATH:-}"
-    export CMAKE_PREFIX_PATH="/usr/local:${CMAKE_PREFIX_PATH:-}"
+    export PKG_CONFIG_PATH="$DESTDIR$INSTALL_PREFIX/lib/pkgconfig:$INSTALL_PREFIX/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+    export CMAKE_PREFIX_PATH="$DESTDIR$INSTALL_PREFIX:$INSTALL_PREFIX:${CMAKE_PREFIX_PATH:-}"
     SYSTEM_FLAGS=(
       "-DUSE_SYSTEM_HYPRUTILS=ON"
       "-DUSE_SYSTEM_HYPRLANG=ON"
       "-DUSE_SYSTEM_HYPRWIRE=ON"
     )
     # Optional preflight: verify hyprwire is discoverable by CMake/pkg-config
-    if [ ! -e "/usr/local/lib/cmake/Hyprwire/HyprwireConfig.cmake" ] && ! pkg-config --exists hyprwire 2>/dev/null; then
-      echo "${NOTE} hyprwire not detected in /usr/local yet. Ensure install-scripts/hyprwire.sh ran successfully or set USE_SYSTEM_HYPRLIBS=0 to use subprojects."
+    if [ ! -e "$INSTALL_PREFIX/lib/cmake/Hyprwire/HyprwireConfig.cmake" ] && ! pkg-config --exists hyprwire 2>/dev/null; then
+      echo "${NOTE} hyprwire not detected. Ensure install-scripts/hyprwire.sh ran successfully or set USE_SYSTEM_HYPRLIBS=0 to use subprojects."
     fi
   else
     # Ensure we do not accidentally pick up mismatched system headers
@@ -273,6 +273,7 @@ else
 fi
 
 CONFIG_FLAGS=(
+    -DCMAKE_INSTALL_PREFIX:PATH=$INSTALL_PREFIX
     -DCMAKE_BUILD_TYPE=Release
     -DCMAKE_C_COMPILER="${CC}"
     -DCMAKE_CXX_COMPILER="${CXX}"
@@ -286,8 +287,15 @@ cmake -S . -B "$BUILD_DIR" "${CONFIG_FLAGS[@]}"
 cmake --build "$BUILD_DIR" -j "$(nproc 2>/dev/null || getconf _NPROCESSORS_CONF)"
 
     if [ $DO_INSTALL -eq 1 ]; then
-        if sudo cmake --install "$BUILD_DIR" 2>&1 | tee -a "$MLOG"; then
+        if $(install_sudo) env $(install_destdir_env) cmake --install "$BUILD_DIR" 2>&1 | tee -a "$MLOG"; then
             printf "${OK} ${MAGENTA}Hyprland tag${RESET}  installed successfully.\n" 2>&1 | tee -a "$MLOG"
+
+            # Hyprland's CMake pulls glaze via FetchContent and `cmake --install`
+            # ships its headers under $prefix/include/glaze. Debian provides
+            # those headers via libglaze-dev — shipping ours would conflict on
+            # `dpkg -i`. Glaze is header-only and only needed at build time, so
+            # drop the staged copy.
+            $(install_sudo) rm -rf "$DESTDIR$INSTALL_PREFIX/include/glaze"
             
             # Update version header file for tools like fastfetch that read it at runtime
             printf "${NOTE} Updating system version header for Hyprland...\n"
@@ -362,21 +370,23 @@ cmake --build "$BUILD_DIR" -j "$(nproc 2>/dev/null || getconf _NPROCESSORS_CONF)
                 printf '%s\n' "#define HYPRGRAPHICS_VERSION \"$HYPRGRAPHICS_VER\"" >> /tmp/version_header.h.tmp
 
                 TARGETS=()
-                if [ -f /usr/local/include/hyprland/src/version.h ]; then
-                    TARGETS+=(/usr/local/include/hyprland/src/version.h)
+                if [ -f "$DESTDIR$INSTALL_PREFIX/include/hyprland/src/version.h" ]; then
+                    TARGETS+=("$DESTDIR$INSTALL_PREFIX/include/hyprland/src/version.h")
                 fi
+                # /usr/include is a live-system target; intentionally left without $DESTDIR
+                # so a packaging build will not redundantly write to the live filesystem.
                 if [ -f /usr/include/hyprland/src/version.h ]; then
                     # If both exist, keep /usr/include in sync to avoid fastfetch mismatch.
                     TARGETS+=(/usr/include/hyprland/src/version.h)
                 fi
                 if [ ${#TARGETS[@]} -eq 0 ]; then
-                    # Default to /usr/local if neither header exists yet.
-                    TARGETS+=(/usr/local/include/hyprland/src/version.h)
+                    # Default to $INSTALL_PREFIX if neither header exists yet.
+                    TARGETS+=("$DESTDIR$INSTALL_PREFIX/include/hyprland/src/version.h")
                 fi
 
                 UPDATED=0
                 for tgt in "${TARGETS[@]}"; do
-                    if sudo install -d "$(dirname "$tgt")" && sudo cp /tmp/version_header.h.tmp "$tgt" 2>&1 | tee -a "$MLOG"; then
+                    if $(install_sudo) install -d "$(dirname "$tgt")" && $(install_sudo) cp /tmp/version_header.h.tmp "$tgt" 2>&1 | tee -a "$MLOG"; then
                         UPDATED=1
                     fi
                 done

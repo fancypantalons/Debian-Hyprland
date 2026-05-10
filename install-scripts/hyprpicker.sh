@@ -41,16 +41,16 @@ if git clone --recursive ${git_ref:+-b "$git_ref"} https://github.com/hyprwm/hyp
     BUILD_DIR="$BUILD_ROOT/hyprpicker"
     rm -rf "$BUILD_DIR" && mkdir -p "$BUILD_DIR"
     if [ -f CMakeLists.txt ]; then
-        cmake -S . -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE=Release
+        cmake -S . -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$INSTALL_PREFIX"
         cmake --build "$BUILD_DIR" -j "$(nproc 2>/dev/null || getconf _NPROCESSORS_CONF)"
-        if [ $DO_INSTALL -eq 1 ]; then sudo cmake --install "$BUILD_DIR" 2>&1 | tee -a "$MLOG"; else echo "${NOTE} DRY RUN: skip install" | tee -a "$MLOG"; fi
+        if [ $DO_INSTALL -eq 1 ]; then $(install_sudo) env $(install_destdir_env) cmake --install "$BUILD_DIR" 2>&1 | tee -a "$MLOG"; else echo "${NOTE} DRY RUN: skip install" | tee -a "$MLOG"; fi
     elif [ -f meson.build ]; then
-        meson setup "$BUILD_DIR" --buildtype=release
+        meson setup "$BUILD_DIR" --buildtype=release --prefix="$INSTALL_PREFIX"
         meson compile -C "$BUILD_DIR"
-        if [ $DO_INSTALL -eq 1 ]; then sudo meson install -C "$BUILD_DIR" 2>&1 | tee -a "$MLOG"; else echo "${NOTE} DRY RUN: skip install" | tee -a "$MLOG"; fi
+        if [ $DO_INSTALL -eq 1 ]; then $(install_sudo) env $(install_destdir_env) meson install -C "$BUILD_DIR" 2>&1 | tee -a "$MLOG"; else echo "${NOTE} DRY RUN: skip install" | tee -a "$MLOG"; fi
     elif [ -f Cargo.toml ]; then
         cargo build --release 2>&1 | tee -a "$MLOG"
-        if [ $DO_INSTALL -eq 1 ]; then sudo install -Dm755 target/release/hyprpicker /usr/local/bin/hyprpicker; fi
+        if [ $DO_INSTALL -eq 1 ]; then $(install_sudo) install -Dm755 target/release/hyprpicker "$DESTDIR$INSTALL_PREFIX/bin/hyprpicker"; fi
     else
         echo "${ERROR} Unknown build system for hyprpicker" | tee -a "$MLOG"
     fi
